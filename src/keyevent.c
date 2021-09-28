@@ -38,12 +38,6 @@
 void Mouse_hndlr(void); /* Fields mouse events from driver        */
                         /*  (during servicing of mouse interrupt) */
 
-#elif SUNDISPLAY
-#include <sunwindow/window_hs.h>
-#include <sunwindow/win_ioctl.h>
-#include <suntool/window.h>
-#include <ctype.h>
-#include <sundev/kbio.h>
 #endif /* DOS */
 
 #include "lispemul.h"
@@ -139,10 +133,6 @@ extern DLword *DisplayRegion68k;
 static struct timeval SelectTimeout = {0, 0};
 #endif /* DOS */
 
-#ifdef XWINDOW
-extern volatile sig_atomic_t Event_Req;
-#endif /* XWINDOW */
-
 extern MISCSTATS *MiscStats;
 LispPTR *LASTUSERACTION68k;
 LispPTR *CLastUserActionCell68k;
@@ -179,25 +169,6 @@ typedef struct {
 /*  EmXXXX68K are already swapped, no need for GETWORD */
 
 
-#ifdef SUNDISPLAY
-#ifdef OLD_CURSOR
-#define TrackCursor(cx, cy)                          \
-  {                                                  \
-    *CLastUserActionCell68k = MiscStats->secondstmp; \
-    *EmCursorX68K = cx;                              \
-    *EmCursorY68K = cy;                              \
-  }
-#else
-#define TrackCursor(cx, cy)                          \
-  {                                                  \
-    *CLastUserActionCell68k = MiscStats->secondstmp; \
-    taking_mouse_down();                             \
-    taking_mouse_up(cx, cy);                         \
-    *EmCursorX68K = cx;                              \
-    *EmCursorY68K = cy;                              \
-  }
-#endif /* OLD_CURSOR */
-#endif /* SUNDISPLAY */
 
 /* commented out is some code that would also clobber
         Irq_Stk_Check & Irq_Stk_End to force
@@ -212,7 +183,7 @@ LispPTR *MOUSECHORDTICKS68k;
 /**NEW GLOBAL***-> will be moved***/
 LispPTR *KEYBOARDEVENTQUEUE68k;
 LispPTR *KEYBUFFERING68k;
-int KBDEventFlg = NIL;
+int KBDEventFlg = 0;
 DLword *CTopKeyevent;
 
 LispPTR DOBUFFEREDTRANSITION_index;
@@ -238,20 +209,12 @@ DLword ColorCursor_savebitmap[CURSORWIDTH / COLORPIXELS_IN_DLWORD * CURSORHEIGHT
 
 /************************************************************************/
 /*									*/
-/*			G E T S I G N A L D A T A			*/
+/*			p r o c e s s _ i o _ e v e n t s		*/
 /*									*/
-/*	Handler for the SIGIO interrupt, which happens			*/
-/*		1. When a key transition happens			*/
-/*		2. On mouse moves					*/
-/*		3. When TCP input becomes available.			*/
-/*		4. When a NIT ethernet packet becomes available.	*/
-/*		5. When a console/log/stderr msg needs to be printed.	*/
-/*									*/
-/*									*/
-/*									*/
-/*									*/
-/*									*/
-/*									*/
+/*	Periodically, or After a SIGIO interrupt which happens		*/
+/*		1. When TCP input becomes available.			*/
+/*		2. When a NIT ethernet packet becomes available.	*/
+/*		3. When a console/log/stderr msg needs to be printed.	*/
 /*									*/
 /*									*/
 /*	Statics:  LispReadFds	A 32-bit vector with a 1 for each	*/
@@ -281,65 +244,16 @@ DLword ColorCursor_savebitmap[CURSORWIDTH / COLORPIXELS_IN_DLWORD * CURSORHEIGHT
 /*									*/
 /************************************************************************/
 
-void getsignaldata(int sig)
+void process_io_events()
 {
 #ifndef DOS
-#ifdef SUNDISPLAY
-  struct inputevent event;
-#endif /* SUNDISPLAY */
-  fd_set rfds, efds;
+  fd_set rfds;
   u_int iflags;
   int i;
 
-#ifdef XWINDOW
-#if defined(sun)
-  if (Event_Req) {
-    if (!XLocked++)
-      getXsignaldata(currentdsp);
-    else
-      XNeedSignal = 1;
-    Event_Req = FALSE;
-    XLocked--;
-  }
-#endif
-#endif /* XWINDOW */
-
-  /* #ifndef KBINT */
-  /* FD_COPY would be preferred but uses deprecated bcopy() on macOS.  Why? */
   memcpy(&rfds, &LispReadFds, sizeof(rfds));
-  memcpy(&efds, &LispReadFds, sizeof(efds));
 
-/* label and ifs not needed if only keyboard on SIGIO */
-getmore:
-  if (select(32, &rfds, NULL, &efds, &SelectTimeout) >= 0)
-  {
-      /* need to print out fd sets...
-    DBPRINT(("SIGIO: fd mask(r/e) = 0x%x/0x%x.\n", rfds, efds));
-      */
-
-#ifdef SUNDISPLAY
-    if (LispWindowFd >= 0 && FD_ISSET(LispWindowFd, &rfds)) {
-      /* #endif */
-      while (input_readevent(LispWindowFd, &event) >= 0) {
-        /*if(!kb_event( &event )) {goto getmore;};*/
-        if ((KBDEventFlg += kb_event(&event)) > 0) {
-          /* immediately request for IRQ check */
-          Irq_Stk_End = Irq_Stk_Check = 0;
-        }
-      }
-      /* #ifndef KBINT */
-    }
-#endif /* SUNDISPLAY */
-
-#ifdef XWINDOW
-    if (FD_ISSET(ConnectionNumber(currentdsp->display_id), &rfds)) {
-      if (!XLocked)
-        getXsignaldata(currentdsp);
-      else
-        XNeedSignal = 1;
-    }
-
-#endif /* XWINDOW */
+  if (select(32, &rfds, NULL, NULL, &SelectTimeout) > 0) {
 
 #ifdef MAIKO_ENABLE_ETHERNET
     if (ether_fd >= 0 && FD_ISSET(ether_fd, &rfds)) { /* Raw ethernet (NIT) I/O happened, so handle it. */
@@ -379,134 +293,8 @@ getmore:
   }
 /* #endif */
 #endif /* DOS */
-} /* end getsignaldata */
+} /* end process_io_events */
 
-#ifdef SUNDISPLAY
-/************************************************************************/
-/*									*/
-/*			    k b _ e v e n t				*/
-/*									*/
-/*	Given an event from the kbd code, return 1 if a key transition	*/
-/*	occurred, 0 if one didn't occur.				*/
-/*									*/
-/************************************************************************/
-extern int for_makeinit;
-
-int kb_event(struct inputevent *event);
-{
-  register u_int upflg;
-  int kn;
-  DLword w, r;
-  KBEVENT *kbevent;
-
-#ifdef INIT
-
-  /* generate some code to check if we are running as an INIT.  Don't
-     needlessly generate this code, and don't return if we aren't
-     running with the -INIT flag turned on.  --was 2/7/89 */
-
-  if (for_makeinit) { return (0); };
-
-#endif
-
-  upflg = event_is_up(event);
-
-#ifdef SHOWKEYSTROKES
-  printf("Key # %d, upflg %d.\n", (unsigned short)event->ie_code, upflg);
-#endif
-
-  switch (((unsigned short)event->ie_code)) {
-    case LOC_MOVE:
-#ifndef OLD_CURSOR
-      if (!ScreenLocked)
-#endif
-      {
-        ScreenLocked = T;
-        MouseMove(event->ie_locx, event->ie_locy);
-        TrackCursor(event->ie_locx, event->ie_locy);
-        ScreenLocked = NIL;
-      }
-      return (0);
-
-    case MS_LEFT: /*mouse_button( MOUSE_LEFT, upflg );*/
-      PUTBASEBIT68K(EmRealUtilin68K, MOUSE_LEFT, upflg);
-      break;
-
-    case MS_MIDDLE: /*mouse_button( MOUSE_MIDDLE, upflg );*/
-      PUTBASEBIT68K(EmRealUtilin68K, MOUSE_MIDDLE, upflg);
-      break;
-
-    case MS_RIGHT: /*mouse_button( MOUSE_RIGHT, upflg );*/
-      PUTBASEBIT68K(EmRealUtilin68K, MOUSE_RIGHT, upflg);
-      break;
-
-    default: /* keystroke */
-      if ((kn = SUNLispKeyMap[((unsigned short)event->ie_code)]) < 255)
-        kb_trans(kn, upflg);
-      else
-        printf("kb_event: unknown key number=%d\n", event->ie_code);
-
-      break;
-  };
-  {
-  do_ring:
-    /* Emxxx do not use GETWORD */
-    if (((*EmKbdAd268K) & 2113) == 0) { /*Ctrl-shift-NEXT*/
-      error("******  EMERGENCY Interrupt ******");
-      (*EmKbdAd268K) = KB_ALLUP;        /*reset*/
-      ((RING *)CTopKeyevent)->read = 0; /* reset queue */
-      ((RING *)CTopKeyevent)->write = MINKEYEVENT;
-      /*return(0);*/
-    } else if (((*EmKbdAd268K) & 2114) == 0) { /* Ctrl-Shift-DEL */
-      (*EmKbdAd268K) = KB_ALLUP;               /*reset*/
-      URaid_req = T;
-      ((RING *)CTopKeyevent)->read = 0; /* reset queue */
-      ((RING *)CTopKeyevent)->write = MINKEYEVENT;
-
-      /*return(0);*/
-    }
-
-#ifdef OS4_TYPE4BUG
-    else if (((*EmKbdAd268K) & 2120) == 0) { /* Ctrl-Shift-Return */
-      error("******  EMERGENCY Interrupt ******");
-      (*EmKbdAd268K) = KB_ALLUP;        /*reset*/
-      ((RING *)CTopKeyevent)->read = 0; /* reset queue */
-      ((RING *)CTopKeyevent)->write = MINKEYEVENT;
-      /*return(0);*/
-    }
-#endif
-
-    r = RING_READ(CTopKeyevent);
-    w = RING_WRITE(CTopKeyevent);
-
-    if (r == w) goto KBnext; /* event queue FULL */
-
-    kbevent = (KBEVENT *)(CTopKeyevent + w);
-
-    /*	RCLK(kbevent->time); */
-
-    kbevent->W0 = (*EmKbdAd068K); /* Emxxxx do not use GETWORD */
-    kbevent->W1 = (*EmKbdAd168K);
-    kbevent->W2 = (*EmKbdAd268K);
-    kbevent->W3 = (*EmKbdAd368K);
-    kbevent->W4 = (*EmKbdAd468K);
-    kbevent->W5 = (*EmKbdAd568K);
-    kbevent->WU = (*EmRealUtilin68K);
-
-    if (r == 0) /* Queue was empty */
-      ((RING *)CTopKeyevent)->read = w;
-    if (w >= MAXKEYEVENT)
-      ((RING *)CTopKeyevent)->write = MINKEYEVENT;
-    else
-      ((RING *)CTopKeyevent)->write = w + KEYEVENTSIZE;
-
-  KBnext:
-    if (*KEYBUFFERING68k == NIL) *KEYBUFFERING68k = ATOM_T;
-
-  } /* if *EmRealUtilin68K end */
-  return (1);
-}
-#endif /* SUNDISPLAY */
 
 /************************************************************************/
 /*									*/

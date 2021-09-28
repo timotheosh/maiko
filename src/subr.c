@@ -29,6 +29,7 @@
 /***********************************************************/
 
 #include <stdio.h>
+#include <time.h>
 #include "lispemul.h"
 #include "address.h"
 #include "adr68k.h"
@@ -62,6 +63,9 @@
 #include "unixcommdefs.h"
 #include "uutilsdefs.h"
 #include "vmemsavedefs.h"
+#ifdef MAIKO_ENABLE_FOREIGN_FUNCTION_INTERFACE
+#include "foreigndefs.h"
+#endif
 
 extern LispPTR *PENDINGINTERRUPT68k;
 
@@ -336,17 +340,17 @@ void OP_subrcall(int subr_no, int argnum) {
       C_slowbltchar(args);
       break;
 
-    case 0215:
+    case sb_UNCOLORIZE_BITMAP:
       POP_SUBR_ARGS;
       Uncolorize_Bitmap(args);
       break;
 
-    case 0216:
+    case sb_COLORIZE_BITMAP:
       POP_SUBR_ARGS;
       Colorize_Bitmap(args);
       break;
 
-    case 0217:
+    case sb_COLOR_8BPPDRAWLINE:
       POP_SUBR_ARGS;
       Draw_8BppColorLine(args);
       break;
@@ -669,7 +673,7 @@ void OP_subrcall(int subr_no, int argnum) {
       TopOfStack = with_symbol(args[0], args[1], args[2], args[3], args[4], args[5]);
       break;
 
-    case 0222: /* Cause an interrupt to occur.  Used by */
+    case sb_CAUSE_INTERRUPT: /* Cause an interrupt to occur.  Used by */
                /* Lisp INTERRUPTED to re-set an interrupt */
                /* when it's uninterruptible. 		*/
       POP_SUBR_ARGS;
@@ -682,7 +686,7 @@ void OP_subrcall(int subr_no, int argnum) {
     /*****************************************/
     /*  foreign-function-call support subrs  */
     /*****************************************/
-    case sb_CALL_C_FN: {
+    case sb_CALL_C_FUNCTION: {
       POP_SUBR_ARGS;
       TopOfStack = call_c_fn(args); /* args[0]=fnaddr, args[1]=fn type */
       break;
@@ -717,27 +721,27 @@ void OP_subrcall(int subr_no, int argnum) {
       TopOfStack = Mdld_function_executable_p(args);
       break;
     }
-    case sb_DLD_LIST_UNDEFINED_SYM: {
+    case sb_DLD_LIST_UNDEFINED_SYMBOLS: {
       POP_SUBR_ARGS;
       TopOfStack = Mdld_list_undefined_sym();
       break;
     }
-    case sb_MALLOC: {
+    case sb_C_MALLOC: {
       POP_SUBR_ARGS;
       TopOfStack = c_malloc(args);
       break;
     }
-    case sb_FREE: {
+    case sb_C_FREE: {
       POP_SUBR_ARGS;
       TopOfStack = c_free(args);
       break;
     }
-    case sb_PUT_C_BASEBYTE: {
+    case sb_C_PUTBASEBYTE: {
       POP_SUBR_ARGS;
       TopOfStack = put_c_basebyte(args);
       break;
     }
-    case sb_GET_C_BASEBYTE: {
+    case sb_C_GETBASEBYTE: {
       POP_SUBR_ARGS;
       TopOfStack = get_c_basebyte(args);
       break;
@@ -779,6 +783,20 @@ void OP_subrcall(int subr_no, int argnum) {
       break;
     }
 #endif /* LPSOLVE */
+  case sb_YIELD: {
+      struct timespec rqts = {0, 833333};
+      unsigned sleepnanos;
+      POP_SUBR_ARGS;
+      N_GETNUMBER(args[0], sleepnanos, ret_nil);
+      if (sleepnanos > 999999999) {
+          TopOfStack = NIL;
+          break;
+      }
+      rqts.tv_nsec = sleepnanos;
+      nanosleep(&rqts, NULL);
+      TopOfStack = ATOM_T;
+      break;
+  }
     default: {
       char errtext[200];
       sprintf(errtext, "OP_subrcall: Invalid alpha byte 0%o", ((*(PC + 1)) & 0xff));

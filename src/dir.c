@@ -329,7 +329,7 @@ void print_finfo(FINFO *fp)
   if (fp != (FINFO *)NULL) {
     do {
       printf("%s -> ", fp->lname);
-      printf("%d\n", fp->version);
+      printf("%u\n", fp->version);
       fp = fp->next;
     } while (fp != (FINFO *)NULL && fp != sp);
 
@@ -685,7 +685,7 @@ static int enum_dsk_prop(char *dir, char *name, char *ver, FINFO **finfo_buf)
       if (*fver == '\0')
         nextp->version = 0;
       else
-        nextp->version = atoi(fver);
+        nextp->version = strtoul(fver, (char **)NULL, 10);
       nextp->ino = sbuf.st_ino;
       nextp->prop->length = (unsigned)sbuf.st_size;
       nextp->prop->wdate = (unsigned)ToLispTime(sbuf.st_mtime);
@@ -948,7 +948,7 @@ static int enum_dsk(char *dir, char *name, char *ver, FINFO **finfo_buf)
       if (*fver == '\0')
         nextp->version = 0;
       else
-        nextp->version = atoi(fver);
+        nextp->version = strtoul(fver, (char **)NULL, 10);
       nextp->ino = sbuf.st_ino;
       n++;
     }
@@ -1399,7 +1399,7 @@ static int trim_finfo(FINFO **fp)
            * Versionless is not linked to any versioned
            * file.
            */
-          sprintf(ver, ";%d", mp->version + 1);
+          sprintf(ver, ";%u", mp->version + 1);
           strcat(sp->lname, ver);
           sp->lname_len = strlen(sp->lname);
           pnum = ++num;
@@ -1527,7 +1527,7 @@ static int trim_finfo_highest(FINFO **fp, int highestp)
            * Versionless is not linked to any versioned
            * file.
            */
-          sprintf(ver, ";%d", mp->version + 1);
+          sprintf(ver, ";%u", mp->version + 1);
           strcat(sp->lname, ver);
           sp->lname_len = strlen(sp->lname);
           /*
@@ -1602,7 +1602,7 @@ static int trim_finfo_highest(FINFO **fp, int highestp)
  * Name:	trim_finfo_version
  *
  * Argument:	FINFO	**fp	Linked list of the numerated FINFO structures.
- *		int	rver	Requested version number.
+ *		unsigned rver	Requested version number.
  *
  * Value:	Returns the total number of files still remaining in **fp.
  *
@@ -1614,7 +1614,7 @@ static int trim_finfo_highest(FINFO **fp, int highestp)
  * are got rid of.
  */
 
-static int trim_finfo_version(FINFO **fp, int rver)
+static int trim_finfo_version(FINFO **fp, unsigned rver)
 {
   register FINFO *tp, *sp, *mp, *cp, *pp, *vp;
   register int num, pnum;
@@ -1709,7 +1709,7 @@ static int trim_finfo_version(FINFO **fp, int rver)
            * file.
            */
           if (mp->version + 1 == rver) {
-            sprintf(ver, ";%d", rver);
+            sprintf(ver, ";%u", rver);
             strcat(sp->lname, ver);
             sp->lname_len = strlen(sp->lname);
             /*
@@ -1840,7 +1840,8 @@ static FINFO **prepare_sort_buf(register FINFO *fp, register int n)
 
 static int dsk_filecmp(FINFO **fp1, FINFO **fp2)
 {
-  register int res, v1, v2;
+  register int res;
+  unsigned v1, v2;
 
   if ((res = strcmp((*fp1)->no_ver_name, (*fp2)->no_ver_name)) != 0) return (res);
 
@@ -2032,7 +2033,8 @@ LispPTR COM_gen_files(register LispPTR *args)
 #ifdef DOS
   char drive[1];
 #endif
-  int dskp, count, highestp, propp, fid, version;
+  int dskp, count, highestp, fid;
+  unsigned propp, version;
   register char *cp;
   FINFO *fp;
   int dsk_filecmp(), unix_filecmp();
@@ -2111,7 +2113,7 @@ LispPTR COM_gen_files(register LispPTR *args)
 
     if (*ver != '\0') {
       highestp = 0;
-      version = atoi(ver);
+      version = strtoul(ver, (char **)NULL, 10);
       if (version > 0) strcpy(ver, "*");
     } else {
       version = 0;
@@ -2193,7 +2195,8 @@ LispPTR COM_next_file(register LispPTR *args)
   register char *base;
   register DFINFO *dfp;
   register UFSGFS *gfsp;
-  int finfoid, propp;
+  int finfoid;
+  unsigned propp;
 
   ERRSETJMP(-1);
   Lisp_errno = &Dummy_errno;

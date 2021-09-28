@@ -18,6 +18,7 @@
 
 #include "version.h"
 
+#include <errno.h>
 #include <fcntl.h>
 #include <setjmp.h>
 #include <signal.h>
@@ -85,11 +86,9 @@ extern DspInterface currentdsp;
  *	to get Alto time.
  */
 
-int TIMEOUT_TIME; /* For file system timeout */
+int TIMEOUT_TIME = 10; /* For file system timeout, seconds, default 10 */
 
-#ifdef XWINDOW
-volatile sig_atomic_t Event_Req = FALSE;
-#endif /* XWINDOW */
+volatile sig_atomic_t IO_Signalled = FALSE;
 
 static int gettime(int casep);
 
@@ -403,7 +402,7 @@ void update_timer() {
 /* TIMER_INTERVAL usec ~ 20  per second.  This should live in some
         machine-configuration
         file somewhere - it can be changed as the -t parameter to lisp*/
-int TIMER_INTERVAL = 25000;
+int TIMER_INTERVAL = 10000;
 
 extern int LispWindowFd;
 
@@ -423,10 +422,6 @@ static void int_timer_service(int sig)
 
   Irq_Stk_Check = 0;
   Irq_Stk_End = 0;
-
-#ifdef XWINDOW
-  Event_Req = TRUE;
-#endif
 }
 
 /************************************************************************/
@@ -466,7 +461,7 @@ static void int_timer_init()
 
   timer_action.sa_handler = int_timer_service;
   sigemptyset(&timer_action.sa_mask);
-  timer_action.sa_flags = 0;
+  timer_action.sa_flags = SA_RESTART;
 
   if (sigaction(SIGVTALRM, &timer_action, NULL) == -1) {
     perror("sigaction: SIGVTALRM");
@@ -496,15 +491,10 @@ void int_io_open(int fd)
 {
 #ifdef DOS
 /* would turn on DOS kbd signal handler here */
-#elif KBINT
-
+#elseif defined(O_ASYNC)
   DBPRINT(("int_io_opening %d\n", fd));
-  if (fcntl(fd, F_SETOWN, getpid()) == -1) {
-#ifdef DEBUG
-    perror("fcntl F_SETOWN ERROR");
-#endif
-  };
-  if (fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_ASYNC) == -1) perror("fcntl F_SETFL error");
+  if (fcntl(fd, F_SETOWN, getpid()) == -1) perror("fcntl F_SETOWN error");
+  if (fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_ASYNC) == -1) perror("fcntl F_SETFL on error");
 #endif
 }
 
@@ -512,9 +502,25 @@ void int_io_close(int fd)
 {
 #ifdef DOS
 /* Turn off signaller here */
-#elif KBINT
-  fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) & ~O_ASYNC);
+#elseif defined(O_ASYNC)
+  if (fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) & ~O_ASYNC) == -1) perror("fcntl_F_SETFL off error");
 #endif
+}
+
+/************************************************************************/
+/*									*/
+/*		    i n t _ i o _ s e r v i c e				*/
+/*									*/
+/*	Handle SIGIO							*/
+/*									*/
+/*									*/
+/************************************************************************/
+
+static void int_io_service(int sig)
+{
+  Irq_Stk_Check = 0;
+  Irq_Stk_End = 0;
+  IO_Signalled = TRUE;
 }
 
 /************************************************************************/
@@ -531,7 +537,7 @@ void int_io_close(int fd)
 static void int_io_init() {
 #ifndef DOS
   struct sigaction io_action;
-  io_action.sa_handler = getsignaldata;
+  io_action.sa_handler = int_io_service;
   sigemptyset(&io_action.sa_mask);
   io_action.sa_flags = 0;
 
@@ -540,11 +546,6 @@ static void int_io_init() {
   } else {
     DBPRINT(("I/O interrupts enabled\n"));
   }
-
-#if defined(XWINDOW) && defined(I_SETSIG)
-  if (ioctl(ConnectionNumber(currentdsp->display_id), I_SETSIG, S_INPUT) < 0)
-    perror("ioctl on X fd - SETSIG for input handling failed");
-#endif
 
 #if defined(USE_DLPI)
   DBPRINT(("INIT ETHER:  Doing I_SETSIG.\n"));
@@ -710,13 +711,12 @@ static void int_file_init() {
   }
 
   /* Set Timeout period */
-  if ((envtime = getenv("LDEFILETIMEOUT")) == NULL) {
-    TIMEOUT_TIME = 10;
-  } else {
-    if ((timeout_time = atoi(envtime)) > 0)
+  envtime = getenv("LDEFILETIMEOUT");
+  if (envtime != NULL) {
+    errno = 0;
+    timeout_time = (int)strtol(envtime, (char **)NULL, 10);
+    if (errno == 0 && timeout_time > 0)
       TIMEOUT_TIME = timeout_time;
-    else
-      TIMEOUT_TIME = 10;
   }
   DBPRINT(("File timeout interrupts enabled\n"));
 }

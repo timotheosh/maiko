@@ -312,6 +312,7 @@ int main(int argc, char *argv[])
   char *envname;
   extern int TIMER_INTERVAL;
   extern fd_set LispReadFds;
+  int tmpint;
 #ifdef MAIKO_ENABLE_FOREIGN_FUNCTION_INTERFACE
   if (dld_find_executable(argv[0]) == 0) {
     perror("Name of executable not found.");
@@ -377,18 +378,32 @@ int main(int argc, char *argv[])
     /* -t and -m are undocumented and somewhat dangerous... */
 
     if (!strcmp(argv[i], "-t")) { /**** timer interval	****/
-      if (argc > ++i)
-        TIMER_INTERVAL = atoi(argv[i]);
-      else {
+      if (argc > ++i) {
+        errno = 0;
+        tmpint = strtol(argv[i], (char **)NULL, 10);
+        if (errno == 0 && tmpint > 0) {
+          TIMER_INTERVAL = tmpint;
+        } else {
+          fprintf(stderr, "Bad value for -t (integer > 0)\n");
+          exit(1);
+        }
+      } else {
         fprintf(stderr, "Missing argument after -t\n");
         exit(1);
       }
     }
 
     else if (!strcmp(argv[i], "-m")) { /**** sysout size	****/
-      if (argc > ++i)
-        sysout_size = atoi(argv[i]);
-      else {
+      if (argc > ++i) {
+        errno = 0;
+        tmpint = strtol(argv[i], (char **)NULL, 10);
+        if (errno == 0 && tmpint > 0) {
+          sysout_size = tmpint;
+        } else {
+          fprintf(stderr, "Bad value for -m (integer > 0)\n");
+          exit(1);
+        }
+      } else {
         fprintf(stderr, "Missing argument after -m\n");
         exit(1);
       }
@@ -453,9 +468,16 @@ int main(int argc, char *argv[])
     }
     /* diagnostic flag for big vmem write() calls */
     else if (!strcmp(argv[i], "-xpages")) {
-      if (argc > ++i)
-        maxpages = atoi(argv[i]);
-      else {
+      if (argc > ++i) {
+        errno = 0;
+        tmpint = strtol(argv[i], (char **)NULL, 10);
+        if (errno == 0 && tmpint > 0) {
+          maxpages = tmpint;
+        } else {
+          fprintf(stderr, "Bad value for -xpages (integer > 0)\n");
+          exit(1);
+        }
+      } else {
         fprintf(stderr, "Missing argument after -xpages\n");
         exit(1);
       }
@@ -468,7 +490,10 @@ int main(int argc, char *argv[])
 #else
   if (getuid() != geteuid()) {
     fprintf(stderr, "Effective user is not real user.  Setting euid to uid.\n");
-    seteuid(getuid());
+    if (seteuid(getuid()) == -1) {
+      fprintf(stderr, "Unable to reset effective user id to real user id\n");
+      exit(1);
+    }
   }
 #endif /* DOS */
 
@@ -517,9 +542,6 @@ int main(int argc, char *argv[])
 
   /* Get OS message to ~/lisp.log and print the message to prompt window */
   if (!for_makeinit) {
-#ifdef SUNDISPLAY
-    mess_init();
-#endif /* SUNDISPLAY */
 
     init_keyboard(0); /* can't turn on the keyboard yet or you will die
                          in makeinit.  Pilotbitblt will turn it on if
@@ -605,7 +627,6 @@ void start_lisp() {
 
 int makepathname(char *src, char *dst)
 {
-  register int len;
   register char *base, *cp;
   register struct passwd *pwd;
   char name[MAXPATHLEN];
@@ -656,7 +677,7 @@ int makepathname(char *src, char *dst)
         if ((cp = (char *)strchr(base + 1, '/')) == 0)
           return (0);
         else {
-          len = (UNSIGNED)cp - (UNSIGNED)base - 1;
+          size_t len = cp - base - 1;
           strncpy(name, base + 1, len);
           name[len] = '\0';
 #ifndef DOS

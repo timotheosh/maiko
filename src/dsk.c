@@ -59,7 +59,7 @@ extern int Dummy_errno;
 
 typedef struct filename_entry {
   char name[MAXPATHLEN]; /* With version, foo.~3~ or foo */
-  int version_no;
+  unsigned version_no;
 } FileName;
 
 typedef struct current_varray {
@@ -851,7 +851,8 @@ LispPTR COM_closefile(register LispPTR *args)
 LispPTR DSK_getfilename(register LispPTR *args)
 {
   register char *base;
-  register int len, dirp, rval;
+  size_t len, rval;
+  register int dirp;
   int fatp;
   char lfname[MAXPATHLEN];
   char aname[MAXNAMLEN];
@@ -1510,7 +1511,8 @@ LispPTR DSK_directorynamep(register LispPTR *args)
 {
   char dirname[MAXPATHLEN];
   char fullname[MAXPATHLEN];
-  register int len, fatp;
+  size_t len;
+  register int fatp;
   register char *base;
 #ifdef DOS
   char drive[1], rawname[MAXNAMLEN];
@@ -1697,7 +1699,8 @@ LispPTR COM_getfileinfo(register LispPTR *args)
       *bufp = sbuf.st_mode;
       return (ATOM_T);
 
-    case AUTHOR:
+    case AUTHOR: {
+      size_t rval;
 #ifndef DOS
       TIMEOUT(pwd = getpwuid(sbuf.st_uid));
       if (pwd == (struct passwd *)NULL) {
@@ -1717,8 +1720,9 @@ LispPTR COM_getfileinfo(register LispPTR *args)
 #endif /* BYTESWAP */
 #endif /* DOS */
       return (GetSmallp(rval));
-
-    case ALL:
+    }
+    case ALL: {
+      size_t rval;
       /*
        * The format of the buffer which has been allocated by Lisp
        * is as follows.
@@ -1756,7 +1760,7 @@ LispPTR COM_getfileinfo(register LispPTR *args)
 #endif /* BYTESWAP	 */
 #endif /* DOS */
       return (GetSmallp(rval));
-
+    }
     default: return (NIL);
   }
 }
@@ -2365,7 +2369,7 @@ LispPTR COM_getfreeblock(register LispPTR *args)
 void separate_version(char *name, char *ver, int checkp)
 {
   register char *start, *end, *cp;
-  register int ver_no;
+  register unsigned ver_no;
   size_t len;
   char ver_buf[VERSIONLEN];
 
@@ -2397,10 +2401,10 @@ void separate_version(char *name, char *ver, int checkp)
         *(start - 1) = '\0';
         *end = '\0';
         /*
-         * Use atoi to eliminate leading 0s.
+         * Use strtoul() to eliminate leading 0s.
          */
-        ver_no = atoi(start + 1);
-        sprintf(ver_buf, "%d", ver_no);
+        ver_no = strtoul(start + 1, (char **)NULL, 10);
+        sprintf(ver_buf, "%u", ver_no);
         strcpy(ver, ver_buf);
         return;
       } else {
@@ -2502,8 +2506,8 @@ int true_name(register char *path)
 #ifdef DOS
   char drive[1];
 #endif
-  register char *sp, *cp;
-  register int type, c;
+  register char c, *sp, *cp;
+  register int type;
 
   if (strcmp(path, "/") == 0) return (-1);
 
@@ -3025,7 +3029,7 @@ static int get_version_array(char *dir, char *file, FileName *varray, CurrentVAr
        * separator_version guarantees ver is a numeric
        * string.
        */
-      svarray->version_no = atoi(ver);
+      svarray->version_no = strtoul(ver, (char **)NULL, 10);
     }
     svarray++;
   }
@@ -3119,7 +3123,7 @@ static int get_version_array(char *dir, char *file, FileName *varray, CurrentVAr
            * separator_version guarantees ver is a numeric
            * string.
            */
-          svarray->version_no = atoi(ver);
+          svarray->version_no = strtoul(ver, (char **)NULL, 10);
         }
         svarray++;
       }
@@ -3263,7 +3267,7 @@ static int maintain_version(char *file, FileName *varray, int forcep)
      * is versioned one higher than the existing highest version.
      */
     FindHighestVersion(varray, entry, max_no);
-    sprintf(ver, "%d", max_no + 1);
+    sprintf(ver, "%u", max_no + 1);
 /*
  * The old file should have the same case name as the versionless
  * file.
@@ -3395,7 +3399,8 @@ static int get_versionless(FileName *varray, char *file, char *dir)
 
 static int check_vless_link(char *vless, FileName *varray, char *to_file, int *highest_p)
 {
-  register int rval, max_no, found;
+  register int rval, found;
+  unsigned max_no;
   ino_t vless_ino;
   struct stat sbuf;
   char dir[MAXPATHLEN], name[MAXNAMLEN], ver[VERSIONLEN];
@@ -3498,7 +3503,7 @@ static int get_old(char *dir, FileName *varray, char *afile, char *vfile)
 {
   char name[MAXPATHLEN], vless[MAXPATHLEN], to_file[MAXPATHLEN];
   char ver[VERSIONLEN], vbuf[VERSIONLEN];
-  register int ver_no, max_no;
+  register unsigned ver_no, max_no;
   int highest_p;
   register FileName *entry;
 
@@ -3528,7 +3533,7 @@ static int get_old(char *dir, FileName *varray, char *afile, char *vfile)
        * varray and try to find the file with the specified
        * version.
        */
-      ver_no = atoi(ver);
+      ver_no = strtoul(ver, (char **)NULL, 10);
       FindSpecifiedVersion(varray, entry, ver_no);
       if (entry != NULL) {
         ConcDirAndName(dir, entry->name, afile);
@@ -3552,7 +3557,7 @@ static int get_old(char *dir, FileName *varray, char *afile, char *vfile)
       strcpy(afile, vless);
       return (1);
     } else {
-      ver_no = atoi(ver);
+      ver_no = strtoul(ver, (char **)NULL, 10);
       if (ver_no == 1) {
         /*
          * Version 1 is specified.  The versionless file is
@@ -3586,13 +3591,13 @@ static int get_old(char *dir, FileName *varray, char *afile, char *vfile)
          * link missing versionless file.
          */
         FindHighestVersion(varray, entry, max_no);
-        sprintf(vbuf, "%d", max_no + 1);
+        sprintf(vbuf, "%u", max_no + 1);
         ConcNameAndVersion(vless, vbuf, vfile);
         strcpy(afile, vless);
         return (1);
       } else {
         /* A version is specified. */
-        ver_no = atoi(ver);
+        ver_no = strtoul(ver, (char **)NULL, 10);
         FindHighestVersion(varray, entry, max_no);
         if (ver_no == max_no + 1) {
           /*
@@ -3601,7 +3606,7 @@ static int get_old(char *dir, FileName *varray, char *afile, char *vfile)
            * is dealt with as a version of the link
            * missing versionless file.
            */
-          sprintf(vbuf, "%d", ver_no);
+          sprintf(vbuf, "%u", ver_no);
           ConcNameAndVersion(vless, vbuf, vfile);
           strcpy(afile, vless);
           return (1);
@@ -3640,7 +3645,7 @@ static int get_old(char *dir, FileName *varray, char *afile, char *vfile)
          * varray and try to find the file with the specified
          * version.
          */
-        ver_no = atoi(ver);
+        ver_no = strtoul(ver, (char **)NULL, 10);
         FindSpecifiedVersion(varray, entry, ver_no);
         if (entry != NULL) {
           ConcDirAndName(dir, entry->name, afile);
@@ -3697,7 +3702,7 @@ static int get_oldest(char *dir, FileName *varray, char *afile, char *vfile)
 {
   char name[MAXPATHLEN], vless[MAXPATHLEN], to_file[MAXPATHLEN];
   char ver[VERSIONLEN], vbuf[VERSIONLEN];
-  register int ver_no, min_no;
+  register unsigned ver_no, min_no;
   int highest_p;
   register FileName *entry;
 
@@ -3727,7 +3732,7 @@ static int get_oldest(char *dir, FileName *varray, char *afile, char *vfile)
        * varray and try to find the file with the specified
        * version.
        */
-      ver_no = atoi(ver);
+      ver_no = strtoul(ver, (char **)NULL, 10);
       FindSpecifiedVersion(varray, entry, ver_no);
       if (entry != NULL) {
         ConcDirAndName(dir, entry->name, afile);
@@ -3751,7 +3756,7 @@ static int get_oldest(char *dir, FileName *varray, char *afile, char *vfile)
       strcpy(afile, vless);
       return (1);
     } else {
-      ver_no = atoi(ver);
+      ver_no = strtoul(ver, (char **)NULL, 10);
       if (ver_no == 1) {
         /*
          * Version 1 is specified.  The versionless file is
@@ -3788,7 +3793,7 @@ static int get_oldest(char *dir, FileName *varray, char *afile, char *vfile)
         return (1);
       } else {
         /* A version is specified. */
-        ver_no = atoi(ver);
+        ver_no = strtoul(ver, (char **)NULL, 10);
         FindHighestVersion(varray, entry, min_no);
         if (ver_no == min_no + 1) {
           /*
@@ -3797,7 +3802,7 @@ static int get_oldest(char *dir, FileName *varray, char *afile, char *vfile)
            * is dealt with as a version of the link
            * missing versionless file.
            */
-          sprintf(vbuf, "%d", ver_no);
+          sprintf(vbuf, "%u", ver_no);
           ConcNameAndVersion(vless, vbuf, vfile);
           strcpy(afile, vless);
           return (1);
@@ -3836,7 +3841,7 @@ static int get_oldest(char *dir, FileName *varray, char *afile, char *vfile)
          * varray and try to find the file with the specified
          * version.
          */
-        ver_no = atoi(ver);
+        ver_no = strtoul(ver, (char **)NULL, 10);
         FindSpecifiedVersion(varray, entry, ver_no);
         if (entry != NULL) {
           ConcDirAndName(dir, entry->name, afile);
@@ -3894,7 +3899,7 @@ static int get_new(char *dir, FileName *varray, char *afile, char *vfile)
 {
   char name[MAXPATHLEN], vless[MAXPATHLEN], to_file[MAXPATHLEN];
   char ver[VERSIONLEN], vbuf[VERSIONLEN];
-  register int ver_no, max_no;
+  register unsigned ver_no, max_no;
   int highest_p;
   register FileName *entry;
 
@@ -3942,7 +3947,7 @@ static int get_new(char *dir, FileName *varray, char *afile, char *vfile)
        * the existing highest version.
        */
       FindHighestVersion(varray, entry, max_no);
-      sprintf(vbuf, "%d", max_no + 1);
+      sprintf(vbuf, "%u", max_no + 1);
       /*
        * We will use the file name of the existing highest
        * versioned file as the name of the new file, so that
@@ -3960,7 +3965,7 @@ static int get_new(char *dir, FileName *varray, char *afile, char *vfile)
        * varray and try to find the file with the specified
        * version.
        */
-      ver_no = atoi(ver);
+      ver_no = strtoul(ver, (char **)NULL, 10);
       FindSpecifiedVersion(varray, entry, ver_no);
       if (entry != NULL) {
         ConcDirAndName(dir, entry->name, afile);
@@ -3998,7 +4003,7 @@ static int get_new(char *dir, FileName *varray, char *afile, char *vfile)
       strcpy(afile, vfile);
       return (1);
     } else {
-      ver_no = atoi(ver);
+      ver_no = strtoul(ver, (char **)NULL, 10);
       if (ver_no == 1) {
         /*
          * Version 1 is specified.  The versionless file is
@@ -4034,13 +4039,13 @@ static int get_new(char *dir, FileName *varray, char *afile, char *vfile)
          * missing versionless file.
          */
         FindHighestVersion(varray, entry, max_no);
-        sprintf(vbuf, "%d", max_no + 2);
+        sprintf(vbuf, "%u", max_no + 2);
         ConcNameAndVersion(vless, vbuf, vfile);
         strcpy(afile, vfile);
         return (1);
       } else {
         /* A version is specified. */
-        ver_no = atoi(ver);
+        ver_no = strtoul(ver, (char **)NULL, 10);
         FindHighestVersion(varray, entry, max_no);
         if (ver_no == max_no + 1) {
           /*
@@ -4049,7 +4054,7 @@ static int get_new(char *dir, FileName *varray, char *afile, char *vfile)
            * is dealt with as a version of the link
            * missing versionless file.
            */
-          sprintf(vbuf, "%d", ver_no);
+          sprintf(vbuf, "%u", ver_no);
           ConcNameAndVersion(vless, vbuf, vfile);
           strcpy(afile, vless);
           return (1);
@@ -4097,7 +4102,7 @@ static int get_new(char *dir, FileName *varray, char *afile, char *vfile)
          * new file.
          */
         FindHighestVersion(varray, entry, max_no);
-        sprintf(vbuf, "%d", max_no + 1);
+        sprintf(vbuf, "%u", max_no + 1);
         /*
          * We will use the name of the highest versioned file
          * as the name of the new file.
@@ -4114,7 +4119,7 @@ static int get_new(char *dir, FileName *varray, char *afile, char *vfile)
          * varray and try to find the file with the specified
          * version.
          */
-        ver_no = atoi(ver);
+        ver_no = strtoul(ver, (char **)NULL, 10);
         FindSpecifiedVersion(varray, entry, ver_no);
         if (entry != NULL) {
           ConcDirAndName(dir, entry->name, afile);
@@ -4188,7 +4193,7 @@ static int get_old_new(char *dir, FileName *varray, char *afile, char *vfile)
 {
   char name[MAXPATHLEN], vless[MAXPATHLEN], to_file[MAXPATHLEN];
   char ver[VERSIONLEN], vbuf[VERSIONLEN];
-  register int ver_no, max_no;
+  register unsigned ver_no, max_no;
   int highest_p;
   register FileName *entry;
 
@@ -4240,7 +4245,7 @@ static int get_old_new(char *dir, FileName *varray, char *afile, char *vfile)
        * varray and try to find the file with the specified
        * version.
        */
-      ver_no = atoi(ver);
+      ver_no = strtoul(ver, (char **)NULL, 10);
       FindSpecifiedVersion(varray, entry, ver_no);
       if (entry != NULL) {
         ConcDirAndName(dir, entry->name, afile);
@@ -4278,7 +4283,7 @@ static int get_old_new(char *dir, FileName *varray, char *afile, char *vfile)
       strcpy(afile, vless);
       return (1);
     } else {
-      ver_no = atoi(ver);
+      ver_no = strtoul(ver, (char **)NULL, 10);
       if (ver_no == 1) {
         /*
          * Version 1 is specified.  The versionless file is
@@ -4313,13 +4318,13 @@ static int get_old_new(char *dir, FileName *varray, char *afile, char *vfile)
          * link missing versionless file.
          */
         FindHighestVersion(varray, entry, max_no);
-        sprintf(vbuf, "%d", max_no + 1);
+        sprintf(vbuf, "%u", max_no + 1);
         ConcNameAndVersion(vless, vbuf, vfile);
         strcpy(afile, vless);
         return (1);
       } else {
         /* A version is specified. */
-        ver_no = atoi(ver);
+        ver_no = strtoul(ver, (char **)NULL, 10);
         FindHighestVersion(varray, entry, max_no);
         if (ver_no == max_no + 1) {
           /*
@@ -4328,7 +4333,7 @@ static int get_old_new(char *dir, FileName *varray, char *afile, char *vfile)
            * is dealt with as a version of the link
            * missing versionless file.
            */
-          sprintf(vbuf, "%d", ver_no);
+          sprintf(vbuf, "%u", ver_no);
           ConcNameAndVersion(vless, vbuf, vfile);
           strcpy(afile, vless);
           return (1);
@@ -4384,7 +4389,7 @@ static int get_old_new(char *dir, FileName *varray, char *afile, char *vfile)
          * varray and try to find the file with the specified
          * version.
          */
-        ver_no = atoi(ver);
+        ver_no = strtoul(ver, (char **)NULL, 10);
         FindSpecifiedVersion(varray, entry, ver_no);
         if (entry != NULL) {
           ConcDirAndName(dir, entry->name, afile);
